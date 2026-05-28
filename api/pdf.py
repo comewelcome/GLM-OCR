@@ -11,6 +11,7 @@ import shutil
 import subprocess
 import uuid
 from datetime import datetime, timezone
+from io import BytesIO
 from pathlib import Path
 from typing import Optional
 
@@ -18,10 +19,13 @@ import httpx
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
+from PIL import Image
 
 VLLM_BASE_URL = os.getenv("VLLM_BASE_URL", "http://glm-ocr:8000")
 PDF_DPI = int(os.getenv("PDF_DPI", "200"))
-PDF_IMAGE_FORMAT = os.getenv("PDF_IMAGE_FORMAT", "png")
+PDF_IMAGE_FORMAT = os.getenv("PDF_IMAGE_FORMAT", "jpeg").lower()
+PDF_MAX_IMAGE_BYTES = int(os.getenv("PDF_MAX_IMAGE_BYTES", "140000"))
+PDF_MAX_IMAGE_DIM = int(os.getenv("PDF_MAX_IMAGE_DIM", "1200"))
 UPLOAD_DIR = Path("/app/uploads")
 OUTPUT_DIR = Path("/app/output")
 
@@ -93,8 +97,18 @@ async def ocr_pdf(
         for page_num, img_path in enumerate(images, 1):
             logger.info("Processing page %d/%d", page_num, len(images))
 
+            prepared_img = _prepare_image_for_vllm(img_path)
+            if prepared_img != img_path:
+                logger.info(
+                    "Using compressed image %s (%d bytes) for page %d",
+                    prepared_img.name,
+                    prepared_img.stat().st_size,
+                    page_num,
+                )
+
             # Read image as base64
-            img_b64 = _image_to_base64(img_path)
+            img_b64 = _image_to_base64(prepared_img)
+            image_type = "jpeg" if prepared_img.suffix.lower() in {".jpg", ".jpeg"} else prepared_img.suffix.lower().lstrip('.')
 
             # Build vLLM request
             vllm_messages = [
@@ -104,7 +118,7 @@ async def ocr_pdf(
                         {"type": "text", "text": prompt},
                         {
                             "type": "image_url",
-                            "image_url": {"url": f"data:image/{PDF_IMAGE_FORMAT};base64,{img_b64}"},
+                            "image_url": {"url": f"data:image/{image_type};base64,{img_b64}"},
                         },
                     ],
                 }
@@ -210,12 +224,15 @@ async def list_ocr_jobs():
 
 def _pdf_to_images(pdf_path: Path, output_dir: Path) -> list[Path]:
     """Convert PDF to images using pdftoppm."""
-    import base64
 
     ext = PDF_IMAGE_FORMAT
     prefix = output_dir / "page"
 
-    format_flag = f"-{ext}"
+    if ext in ("jpg", "jpeg"):
+        format_flag = "-jpeg"
+    else:
+        format_flag = f"-{ext}"
+
     cmd = [
         "pdftoppm",
         "-r", str(PDF_DPI),
@@ -242,15 +259,60 @@ def _pdf_to_images(pdf_path: Path, output_dir: Path) -> list[Path]:
         return []
 
     # Find all generated page images
-    # pdftoppm outputs files like prefix-1.png, prefix-2.png, etc.
+    # pdftoppm outputs files like prefix-1.png, prefix-2.png, or prefix-1.jpg.
     images = []
-    for f in sorted(output_dir.glob(f"page-*.{ext}")):
+    search_ext = "jpg" if ext in ("jpg", "jpeg") else ext
+    for f in sorted(output_dir.glob(f"page-*.{search_ext}")):
         images.append(f)
 
     return images
 
 
+def _prepare_image_for_vllm(img_path: Path) -> Path:
+    """Resize and compress page images to fit model context limits."""
+    if img_path.suffix.lower() in {".jpg", ".jpeg"} and img_path.stat().st_size <= PDF_MAX_IMAGE_BYTES:
+        return img_path
+
+    with Image.open(img_path) as image:
+        image = image.convert("RGB")
+        max_size = max(image.width, image.height)
+        if max_size > PDF_MAX_IMAGE_DIM:
+            ratio = PDF_MAX_IMAGE_DIM / max_size
+            image = image.resize(
+                (max(1, int(image.width * ratio)), max(1, int(image.height * ratio))),
+                Image.LANCZOS,
+            )
+
+        quality = 75
+        buffer = BytesIO()
+        while True:
+            buffer.seek(0)
+            buffer.truncate(0)
+            image.save(buffer, format="JPEG", quality=quality, optimize=True)
+            size = buffer.tell()
+            if size <= PDF_MAX_IMAGE_BYTES or quality <= 30:
+                break
+            quality -= 10
+            if quality <= 30 and size > PDF_MAX_IMAGE_BYTES:
+                image = image.resize(
+                    (max(1, int(image.width * 0.85)), max(1, int(image.height * 0.85))),
+                    Image.LANCZOS,
+                )
+                quality = 50
+
+    output_path = img_path.with_suffix(".jpg")
+    output_path.write_bytes(buffer.getvalue())
+    logger.info(
+        "Prepared image %s for vLLM (%d bytes, quality=%d)",
+        img_path.name,
+        output_path.stat().st_size,
+        quality,
+    )
+    return output_path
+
+
 def _image_to_base64(img_path: Path) -> str:
     """Read image file and return base64 string."""
     import base64
+
     return base64.b64encode(img_path.read_bytes()).decode("ascii")
