@@ -1,15 +1,13 @@
-"""
-OpenAI-compatible endpoints for GLM-OCR.
+"""OpenAI-compatible endpoints for the model server.
 
 Implements:
-  GET  /v1/models           - List models from vLLM
-  POST /v1/chat/completions - Chat with image support
+    GET  /v1/models           - List models from vLLM
+    POST /v1/chat/completions - Chat with image support
 """
 
 import json
 import logging
 import os
-import time
 import uuid
 from datetime import datetime, timezone
 from typing import Any, AsyncGenerator, Optional
@@ -48,7 +46,7 @@ class ChatMessage(BaseModel):
 
 
 class ChatCompletionRequest(BaseModel):
-    model: str = "glm-ocr"
+    model: str = "qwen3-vl-2b"
     messages: list[dict[str, Any]]  # Accept raw dicts for flexibility
     temperature: Optional[float] = None
     top_p: Optional[float] = None
@@ -76,7 +74,7 @@ class ChatCompletionResponse(BaseModel):
     id: str = Field(default_factory=lambda: f"chatcmpl-{uuid.uuid4().hex[:12]}")
     object: str = "chat.completion"
     created: int = Field(default_factory=lambda: int(datetime.now(timezone.utc).timestamp()))
-    model: str = "glm-ocr"
+    model: str = "qwen3-vl-2b"
     choices: list[ChatChoice]
     usage: Optional[UsageInfo] = None
 
@@ -147,8 +145,11 @@ async def chat_completions(req: ChatCompletionRequest):
         )
 
 
-async def _stream_response(model: str, payload: dict) -> AsyncGenerator[bytes, None]:
-    """Stream SSE response from vLLM."""
+async def _stream_response(model: str, payload: dict) -> AsyncGenerator[str, None]:
+    """Stream SSE response from vLLM as text lines.
+
+    Yields strings formatted as SSE `data: ...` lines.
+    """
     import json as j
 
     async with httpx.AsyncClient(timeout=120) as client:
@@ -165,9 +166,11 @@ async def _stream_response(model: str, payload: dict) -> AsyncGenerator[bytes, N
                 return
 
             async for line in resp.aiter_lines():
+                if not line:
+                    continue
                 if line.startswith("data: "):
                     yield line + "\n\n"
-                elif line.strip():
+                else:
                     yield f"data: {line}\n\n"
 
     yield "data: [DONE]\n\n"

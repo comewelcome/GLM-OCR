@@ -18,10 +18,10 @@ services:
               count: all
               capabilities: [gpu]
     command: >
-      --model ${MODEL_ID:-zai-org/GLM-OCR}
+      --model ${MODEL_ID:-ADSKAILab/Zero-To-CAD-Qwen3-VL-2B}
       --port 8000
       --host 0.0.0.0
-      --served-model-name glm-ocr
+      --served-model-name qwen3-vl-2b
       --gpu-memory-utilization ${GPU_MEMORY_UTILIZATION:-0.9}
       --max-model-len ${MAX_MODEL_LEN:-4096}
       --max-num-seqs ${MAX_NUM_SEQS:-4}

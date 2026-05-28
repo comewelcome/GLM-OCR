@@ -1,11 +1,10 @@
-"""
-GLM-OCR API Gateway - OpenAI-compatible API for PDF OCR.
+"""Model OCR API Gateway - OpenAI-compatible API for PDF OCR.
 
 Routes:
-  GET  /v1/models           - List available models
-  POST /v1/chat/completions - Chat completions (images as base64)
-  POST /v1/ocr              - Upload PDF, get OCR result
-  GET  /health              - Health check
+    GET  /v1/models           - List available models
+    POST /v1/chat/completions - Chat completions (images as base64)
+    POST /v1/ocr              - Upload PDF, get OCR result
+    GET  /health              - Health check
 """
 
 import logging
@@ -32,8 +31,8 @@ API_KEY = os.getenv("API_KEY", "")
 async def lifespan(app: FastAPI):
     """Startup / shutdown hooks."""
     import httpx
-    logger.info("Starting GLM-OCR API gateway")
-    logger.info("vLLM endpoint: %s", VLLM_BASE_URL)
+    logger.info("Starting API gateway")
+    logger.info("Model server endpoint: %s", VLLM_BASE_URL)
 
     # Verify vLLM is reachable
     try:
@@ -49,12 +48,12 @@ async def lifespan(app: FastAPI):
 
     yield
 
-    logger.info("Shutting down GLM-OCR API gateway")
+    logger.info("Shutting down API gateway")
 
 
 app = FastAPI(
-    title="GLM-OCR API",
-    description="OpenAI-compatible OCR API powered by GLM-OCR model",
+    title="Model OCR API",
+    description="OpenAI-compatible OCR API powered by a multimodal HF model",
     version="1.0.0",
     lifespan=lifespan,
 )
@@ -104,7 +103,7 @@ async def health():
 
     return {
         "status": "ok",
-        "service": "glm-ocr-api",
+        "service": "model-ocr-api",
         "vllm": {"status": vllm_status, "latency_ms": round(latency * 1000, 1)},
         "endpoints": {
             "chat": "/v1/chat/completions",
@@ -117,7 +116,7 @@ async def health():
 @app.get("/")
 async def root():
     return {
-        "service": "GLM-OCR API",
+        "service": "Model OCR API",
         "version": "1.0.0",
         "docs": "/docs",
         "endpoints": {

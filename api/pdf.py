@@ -1,7 +1,7 @@
-"""
-PDF OCR endpoint.
+"""PDF OCR endpoint.
 
-Uploads PDF, converts to images, sends to vLLM GLM-OCR, returns structured result.
+Uploads PDF, converts to images, sends to the model server, returns structured
+result (per-page markdown + optional JSON).
 """
 
 import json
@@ -17,7 +17,6 @@ from typing import Optional
 
 import httpx
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
-from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from PIL import Image
 
@@ -43,7 +42,7 @@ class OCRPageResult(BaseModel):
 class OCRResponse(BaseModel):
     id: str
     object: str = "ocr.result"
-    model: str = "glm-ocr"
+    model: str = "qwen3-vl-2b"
     created: int
     pages: list[OCRPageResult]
     full_markdown: str
@@ -57,7 +56,7 @@ async def ocr_pdf(
                 "Preserve the structure and formatting as markdown.",
         description="OCR prompt instruction",
     ),
-    model: str = Form(default="glm-ocr", description="Model to use"),
+    model: str = Form(default="qwen3-vl-2b", description="Model to use"),
 ):
     """
     Upload a PDF and get OCR results.
