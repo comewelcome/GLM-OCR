@@ -6,7 +6,7 @@ set -euo pipefail
 # Example:
 #   ./test_ocr.sh AIDATA_translated_eng.pdf
 
-PDF_FILE=${1:-AIDATA_translated_eng.pdf}
+PDF_FILE=${1:-Plan.pdf}
 OUTPUT_FILE=${OUTPUT_FILE:-/tmp/ocr_response.json}
 
 if [ ! -f "$PDF_FILE" ]; then
